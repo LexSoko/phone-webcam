@@ -7,7 +7,6 @@ from server import _audio_q
 
 
 def audio_debug():
-    """Temporary: proves audio data is reaching the PC."""
     total = 0
     while True:
         chunk = _audio_q.get()

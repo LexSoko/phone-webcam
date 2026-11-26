@@ -127,7 +127,7 @@ def audio():
     return "", 204
 
 def audio_debug():
-    """Temporary: proves audio data is reaching the PC."""
+    
     total = 0
     while True:
         chunk = _audio_q.get()
@@ -151,7 +151,7 @@ def webcam_loop(gui):
 
             key = (width, height, fps)
 
-            # Recreate webcam when settings change
+            
             if key != current_key:
 
                 if cam is not None:
@@ -172,13 +172,13 @@ def webcam_loop(gui):
                     f"{width}x{height} @ {fps} FPS"
                 )
 
-            # Read the latest available frame
+            
             with _lock:
                 frame = _latest_frame
 
             if frame is None:
 
-                # Black frame before phone connects
+                
                 rgb = np.zeros(
                     (height, width, 3),
                     dtype=np.uint8

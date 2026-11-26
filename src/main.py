@@ -12,25 +12,25 @@ if __name__ == "__main__":
 
     gui = SettingsWindow(defaults)
 
-    # Flask server thread
+    
     threading.Thread(
         target=run_flask,
         args=(gui.config["port"],),
         daemon=True
     ).start()
 
-    # Virtual webcam thread
+    
     threading.Thread(
         target=webcam_loop,
         args=(gui,),
         daemon=True
     ).start()
 
-    # Temporary audio debugging thread
+    
     threading.Thread(
         target=audio_debug,
         daemon=True
     ).start()
 
-    # Main GUI thread
+    
     gui.run()

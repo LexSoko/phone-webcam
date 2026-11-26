@@ -8,6 +8,7 @@ import sys
 import ttkbootstrap as ttk
 from ttkbootstrap.constants import *
 import socket
+
 from folder import (
     load_json,
     load_config,
@@ -46,11 +47,11 @@ class SettingsWindow:
         self.fps_var = tk.StringVar(value=str(self.config["fps"]))
         self.quality_var = tk.StringVar(value=str(self.config["quality"]))
 
-        self._build_row(card, "Resolution", "Width × Height",
+        self._build_row(card, "Resolution", "Width ; Height",
                         [self.width_var, self.height_var])
         self._build_row(card, "FPS", "Frames per second",
                         [self.fps_var])
-        self._build_row(card, "Quality", "JPEG quality (0.3–1.0)",
+        self._build_row(card, "Quality", "JPEG quality (0.3-1.0)",
                         [self.quality_var])
 
         apply_btn = ttk.Button(
@@ -71,7 +72,7 @@ class SettingsWindow:
         url_frame = ttk.Frame(self.root, padding=12)
         url_frame.pack(fill=X, padx=16, pady=4)
 
-        ttk.Label(url_frame, text="Open this on your phone:",
+        ttk.Label(url_frame, text="open this on your phone:",
                   font=ttk.Font(size=9), foreground="#888").pack(anchor=W)
 
         self.url_var = tk.StringVar(value=self._get_lan_url())
@@ -97,7 +98,7 @@ class SettingsWindow:
         self.root.after(3000, self._refresh_url)
 
     def _build_row(self, parent, label, hint, vars_list):
-        """A single config row with label, hint, and input fields."""
+    
         row = ttk.Frame(parent)
         row.pack(fill=X, pady=2)
 
