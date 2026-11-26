@@ -1,0 +1,347 @@
+<!doctype html>
+<html>
+<head>
+<title>Phone Webcam</title>
+
+<link rel="manifest" href="/manifest.json">
+
+<meta name="theme-color" content="#111111">
+<meta name="mobile-web-app-capable" content="yes">
+
+<link rel="icon" href="/icons/icon192.png">
+
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="/css/style.css">
+<style>
+  body { background:#111; color:#eee; font-family:sans-serif;
+         display:flex; flex-direction:column; align-items:center;
+         justify-content:center; min-height:100vh; margin:0; }
+  h3 { margin-bottom: 1em; }
+  #status { margin-top: 1em; color:#aaa; }
+  button { font-size:1.1em; padding:.7em 1.5em; border:none;
+           border-radius:8px; cursor:pointer; background:#3a86ff;
+           color:#fff; }
+  button:disabled { opacity:.5; cursor:default; }
+  video { border-radius:12px; max-width:90vw; }
+</style>
+</head>
+<body>
+<h3>Phone Webcam</h3>
+<video id="v" autoplay playsinline muted width="320"></video><br>
+<canvas id="c" hidden></canvas>
+<div class="controls">
+    <button id="switchCamera" onclick="switchCamera()">
+    Switch Camera
+    </button>
+    <button id="btn" onclick="start()">Start Streaming</button>
+    <label class="checkbox">
+        <input type="checkbox" id="audio" name="accept" value="accepted">
+        <span class="box"></span>
+        <span class="label">stream audio (not working right now)</span>
+    </label>
+</div>
+
+
+<p id="status">idle</p>
+<script>
+
+let facingMode = "user";
+let video = document.getElementById('v');
+let canvas = document.getElementById('c');
+let ctx = canvas.getContext('2d');
+
+let config = null;
+let stream = null;
+
+let sending = false;
+let audioCtx = null;
+let audioSending = false;
+let audioSource = null;
+let audioProcessor = null;
+let frameTimer = null;
+
+
+async function startAudio(stream) {
+
+    audioCtx = new AudioContext({
+        sampleRate: 16000
+    });
+
+    await audioCtx.resume();
+
+    audioSource = audioCtx.createMediaStreamSource(stream);
+
+    audioProcessor = audioCtx.createScriptProcessor(
+        2048,
+        1,
+        1
+    );
+
+    console.log("Audio sample rate:", audioCtx.sampleRate);
+
+    let audioRequestPending = false;
+
+    audioProcessor.onaudioprocess = (e) => {
+
+        if (!audioSending || audioRequestPending) return;
+
+        const float = e.inputBuffer.getChannelData(0);
+        const pcm16 = new Int16Array(float.length);
+
+        for (let i = 0; i < float.length; i++) {
+
+            const sample = Math.max(
+                -1,
+                Math.min(1, float[i])
+            );
+
+            pcm16[i] = sample < 0
+                ? sample * 32768
+                : sample * 32767;
+        }
+
+        audioRequestPending = true;
+
+        fetch('/audio', {
+            method: 'POST',
+            body: pcm16.buffer,
+            headers: {
+                'Content-Type': 'application/octet-stream'
+            }
+        })
+        .catch(err => {
+            console.error('Audio POST failed:', err);
+        })
+        .finally(() => {
+            audioRequestPending = false;
+        });
+    };
+
+    audioSource.connect(audioProcessor);
+    audioProcessor.connect(audioCtx.destination);
+}
+
+async function start() {
+    const btn = document.getElementById('btn');
+    const status = document.getElementById('status');
+
+    btn.disabled = true;
+
+    // Check browser security
+    if (!window.isSecureContext) {
+        status.textContent = 'HTTPS required for camera access';
+        btn.disabled = false;
+        return;
+    }
+
+    if (!navigator.mediaDevices?.getUserMedia) {
+        status.textContent = 'Camera API unavailable';
+        btn.disabled = false;
+        return;
+    }
+
+    status.textContent = 'Loading configuration...';
+
+    try {
+        const response = await fetch(
+            '/config/webconfig.json',
+            { cache: 'no-store' }
+        );
+
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+        }
+
+        config = await response.json();
+
+        if (
+            !Number.isInteger(config.width) ||
+            !Number.isInteger(config.height) ||
+            config.width <= 0 ||
+            config.height <= 0 ||
+            !Number.isFinite(config.fps) ||
+            config.fps <= 0 ||
+            !Number.isFinite(config.quality) ||
+            config.quality < 0.3 ||
+            config.quality > 1
+        ) {
+            throw new Error('Invalid configuration');
+        }
+
+        console.log('Configuration:', config);
+
+        status.textContent = 'Requesting camera...';
+
+        stream = await navigator.mediaDevices.getUserMedia({
+            video: {
+                facingMode: { ideal: facingMode },
+                width: { ideal: config.width },
+                height: { ideal: config.height },
+                frameRate: { ideal: config.fps }
+            },
+            audio: document.getElementById('audio').checked
+        });
+
+        video.srcObject = stream;
+        await video.play();
+
+        console.log(
+            'Actual camera settings:',
+            stream.getVideoTracks()[0].getSettings()
+        );
+        
+        canvas.width = config.width;
+        canvas.height = config.height;
+
+        if (document.getElementById('audio').checked) {
+            audioSending = true;
+            await startAudio(stream);
+        }
+
+        sending = true;
+
+        status.textContent = 'Streaming...';
+
+        btn.textContent = 'Stop Streaming';
+        btn.onclick = stop;
+        btn.disabled = false;
+
+        sendLoop();
+
+    } catch (e) {
+        stop();
+        status.textContent = 'Error: ' + e.message;
+        console.error(e);
+    }
+}
+function stop() {
+
+    sending = false;
+    audioSending = false;
+
+    clearTimeout(frameTimer);
+    frameTimer = null;
+
+    if (stream) {
+        stream.getTracks().forEach(track => {
+            track.stop();
+        });
+
+        stream = null;
+    }
+
+    if (audioProcessor) {
+        audioProcessor.onaudioprocess = null;
+        audioProcessor.disconnect();
+        audioProcessor = null;
+    }
+
+    if (audioSource) {
+        audioSource.disconnect();
+        audioSource = null;
+    }
+
+    if (audioCtx) {
+        audioCtx.close().catch(console.error);
+        audioCtx = null;
+    }
+
+    video.srcObject = null;
+
+    const btn = document.getElementById('btn');
+
+    btn.textContent = 'Start Streaming';
+    btn.onclick = start;
+    btn.disabled = false;
+
+    document.getElementById('status').textContent =
+        'Stopped';
+}
+async function switchCamera() {
+
+    const wasStreaming = sending;
+
+    facingMode = facingMode === "environment"
+        ? "user"
+        : "environment";
+
+    if (wasStreaming) {
+        stop();
+        await start();
+    }
+}
+async function sendLoop() {
+    if (!sending) return;
+
+    const currentStream = stream;
+    const startTime = performance.now();
+
+    ctx.drawImage(
+        video,
+        0,
+        0,
+        canvas.width,
+        canvas.height
+    );
+
+    canvas.toBlob(async (blob) => {
+
+        if (!sending || stream !== currentStream) return;
+
+        try {
+            if (!blob) {
+                throw new Error('JPEG encoding failed');
+            }
+
+            const response = await fetch('/frame', {
+                method: 'POST',
+                body: blob,
+                headers: {
+                    'Content-Type': 'image/jpeg'
+                }
+            });
+
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}`);
+            }
+
+        } catch (e) {
+            if (stream !== currentStream) return;
+
+            console.error(e);
+            stop();
+
+            document.getElementById('status').textContent =
+                'Disconnected';
+
+            return;
+        }
+
+        if (!sending || stream !== currentStream) return;
+
+        const elapsed = performance.now() - startTime;
+        const targetInterval = 1000 / config.fps;
+        const delay = Math.max(0, targetInterval - elapsed);
+
+        frameTimer = setTimeout(sendLoop, delay);
+
+    }, 'image/jpeg', config.quality);
+}
+async function enterFullscreen() {
+    if (!document.fullscreenElement) {
+        try {
+            await document.documentElement.requestFullscreen({
+                navigationUI: "hide"
+            });
+        } catch (error) {
+            console.warn(error);
+        }
+    }
+}
+
+document.addEventListener("click", enterFullscreen);
+window.addEventListener('pagehide', stop);
+
+</script>
+</body>
+</html>
